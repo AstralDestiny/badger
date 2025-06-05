@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 )
@@ -81,10 +82,11 @@ func (p *Badger) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	queryValues := req.URL.Query()
 
 	if sessionRequestValue := queryValues.Get(p.resourceSessionRequestParam); sessionRequestValue != "" {
+		clientIP := p.getClientIP(req)
 		body := ExchangeSessionBody{
 			RequestToken: &sessionRequestValue,
 			RequestHost:  &req.Host,
-			RequestIP:    &req.RemoteAddr,
+			RequestIP:    &clientIP,
 		}
 
 		jsonData, err := json.Marshal(body)
@@ -152,6 +154,7 @@ func (p *Badger) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	clientIP := p.getClientIP(req)
 	cookieData := VerifyBody{
 		Sessions:           cookies,
 		OriginalRequestURL: originalRequestURL,
@@ -160,7 +163,7 @@ func (p *Badger) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		RequestPath:        &req.URL.Path,
 		RequestMethod:      &req.Method,
 		TLS:                req.TLS != nil,
-		RequestIP:          &req.RemoteAddr,
+		RequestIP:          &clientIP,
 		Headers:            headers,
 		Query:              queryParams,
 	}
@@ -249,4 +252,18 @@ func (p *Badger) getScheme(req *http.Request) string {
 		return "https"
 	}
 	return "http"
+}
+
+func (p *Badger) getClientIP(req *http.Request) string {
+	if forwardedFor := req.Header.Get("X-Forwarded-For"); forwardedFor != "" {
+		ips := strings.Split(forwardedFor, ",")
+		if len(ips) > 0 {
+			return strings.TrimSpace(ips[0])
+		}
+	}
+	ip, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr // Fallback to original if splitting fails
+	}
+	return ip
 }
